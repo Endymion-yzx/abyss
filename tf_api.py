@@ -2,7 +2,16 @@ from kubernetes import client, config
 from random import randint
 
 class TensorFlowMission(object):
-	def __init__(self, name=None, script=None, image=None, arch=None, num_ps=None, num_worker=None, port=None, data_dir=None, train_dir=None):
+	def __init__(self, 
+	             name=None, 
+				 script=None, 
+				 image='495609715/tf:v1',       # Default image provided by cloud 
+				 arch='parameter-server', 
+				 num_ps=None, 
+				 num_worker=None, 
+				 port=None, 
+				 data_dir=None, 
+				 train_dir=None):
 		self._name = name
 		self._script = script
 		self._image = image
@@ -13,8 +22,7 @@ class TensorFlowMission(object):
 		self._data_dir = data_dir
 		self._train_dir = train_dir
 
-		if self._arch == None:
-			self._arch = 'parameter-server'         # Default
+		self._resources = { 'service': [], 'replicaset': [], 'pod': [] }
 
 	@property
 	def name(self):
@@ -101,11 +109,9 @@ class TensorFlowMission(object):
 
 		if self._arch == 'parameter-server':
 			if not self._num_ps:
-				print 'Number of parameter servers not specified'
-				return
+				self._num_ps = 1
 			if not self._num_worker:
-				print 'Number of workers not specified'
-				return
+				self._num_worker = 1
 			if not self._port:
 				# Get an available port
 				self._port = randint(5000, 10000)
@@ -117,7 +123,6 @@ class TensorFlowMission(object):
 				pass
 
 			config.load_kube_config()
-			self._resources = { 'service': [], 'replicaset': [] }
 
 			job_name = [ 'ps', 'worker' ]
 			job_num = { 'ps': self._num_ps, 'worker': self._num_worker }
@@ -204,13 +209,31 @@ class TensorFlowMission(object):
 					self._resources['replicaset'].append(replicaset)
 
 	def reset(self):
-		if self._resources:
-			api_instance = client.CoreV1Api()
-			for service in self._resources['service']:
-				api_instance.delete_namespaced_service(name=service.metadata.name, namespace='default')
-			api_instance = client.ExtensionsV1beta1Api()
-			for replicaset in self._resources['replicaset']:
-				api_instance.delete_namespaced_replica_set(name=replicaset.metadata.name, namespace='default', body=client.V1DeleteOptions())
+		api_instance = client.CoreV1Api()
+		for service in self._resources['service']:
+			api_instance.delete_namespaced_service(name=service.metadata.name, namespace='default')
+
+		api_instance = client.ExtensionsV1beta1Api()
+		clearScale = client.ExtensionsV1beta1Scale(
+			api_version='extensions/v1beta1',
+			kind='Scale',
+			metadata=client.V1ObjectMeta(name='clear', namespace='default'),
+			spec=client.ExtensionsV1beta1ScaleSpec(replicas=0)) 
+		for replicaset in self._resources['replicaset']:
+			clearScale = client.ExtensionsV1beta1Scale(
+				api_version='extensions/v1beta1',
+				kind='Scale',
+				metadata=client.V1ObjectMeta(name=replicaset.metadata.name, namespace='default'),
+				spec=client.ExtensionsV1beta1ScaleSpec(replicas=0)) 
+
+			api_instance.replace_namespaced_replica_set_scale(
+				name=replicaset.metadata.name,
+				namespace='default',
+				body=clearScale)
+			
+			api_instance.delete_namespaced_replica_set(name=replicaset.metadata.name, namespace='default', body=client.V1DeleteOptions())
+
+		self._resources = { 'service': [], 'replicaset': [], 'pod': [] }
 
 	def __del__(self):
 		self.reset()
