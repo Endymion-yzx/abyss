@@ -6,21 +6,22 @@ class AbyssSession():
 	def __init__(self):
 		self._closed = False
 
+		self._coord_port = randint(5000, 10000)
 		self._resources = { 'service':[], 'replicaset':[] }
-		self._worker_name = 'tf-worker'
-		self._worker_port = randint(5000, 10000)
+		self._container_name = 'tf-container'
+		self._container_port = randint(5000, 10000)
 		self._namespace = 'tensorflow'
-		self._image = '495609715/tf_worker:v1'
-		self._script = 'worker.py'
+		self._image = '495609715/tf_container:v1'
+		self._script = 'container.py'
 
 		# Start a container
 		service = client.V1Service()
 		service.api_version = 'v1'
 		service.kind = 'Service'
-		service.metadata = client.V1ObjectMeta(name=self._worker_name)
+		service.metadata = client.V1ObjectMeta(name=self._container_name)
 		srvSpec = client.V1ServiceSpec()
-		srvSpec.selector = { 'name': self._name, 'job': 'worker', 'task': '0' }
-		srvSpec.ports = [client.V1ServicePort(port=self._worker_port)]
+		srvSpec.selector = { 'name': self._name, 'job': 'container', 'task': '0' }
+		srvSpec.ports = [client.V1ServicePort(port=self._container_port)]
 		service.spec = srvSpec
 		api_instance = client.CoreV1Api()
 		api_instance.create_namespaced_service(namespace=self._namespace, body=service)
@@ -29,25 +30,25 @@ class AbyssSession():
 		replicaset = client.V1beta1ReplicaSet()
 		replicaset.api_version = 'extensions/v1beta1'
 		replicaset.kind = 'ReplicaSet'
-		replicaset.metadata = client.V1ObjectMeta(name=self._worker_name)
+		replicaset.metadata = client.V1ObjectMeta(name=self._container_name)
 		rsSpec = client.V1beta1ReplicaSetSpec()
 		rsSpec.replicas = 1
 
 		template = client.V1PodTemplateSpec()
-		template.metadata = client.V1ObjectMeta(labels={'name':self._worker_name, 'job':'worker', 'task':'0'})
+		template.metadata = client.V1ObjectMeta(labels={'name':self._container_name, 'job':'container', 'task':'0'})
 		podSpec = client.V1PodSpec()
 		container = client.V1Container()
 		container.name = 'tensorflow'
 		container.image = self._image
-		container.ports = [client.V1ContainerPort(self._worker_port)]
+		container.ports = [client.V1ContainerPort(self._container_port)]
 		container.command = ['/usr/bin/python', self._script]
 		container.args = []
-		# TODO: include the address of the coordinator in the arguments
-		# container.args.append('--job_name='+job)
-		# container.args.append('--task_index='+str(i))
+		# Command line arguments
+		container.args.append('--job_name=container')
+		container.args.append('--task_index=0')
 
-		# container.args.append(worker_arg)
-		# container.args.append(ps_arg)
+		container.args.append('--coord_host=192.168.2.110:'+str(self._coord_port))
+		container.args.append('--container_hosts='+self._container_name+':'+str(self._container_port))
 
 		podSpec.containers = [container]
 		template.spec = podSpec
@@ -58,8 +59,9 @@ class AbyssSession():
 		self._resources['replicaset'].append(replicaset)
 
 		# Create the cluster
-		cluster = tf.train.ClusterSpec({'coord': ['XXX'], 
-			'worker': [self._worker_name+':'+str(self._worker_port)]})
+		# TODO: decide the coordinator's address
+		cluster = tf.train.ClusterSpec({'coord': ['192.168.2.110:'+str(self._coord_port)], 
+			'container': [self._container_name+':'+str(self._container_port)]})
 		server = tf.train.Server(cluster, job_name='coord', task_index=0)
 
 		# Create a session
@@ -68,13 +70,16 @@ class AbyssSession():
 	def run(self, fetches, feed_dict=None, options=None, run_metadata=None):
 		if isinstance(fetches, tf.Tensor):
 			g = fetches.graph
+			nodes = g._nodes_by_id.values()
+			for node in nodes:
+				node._set_device('/job:container/task:0')
 		else:
 			fetch_list = list(fetches)
-			g = fetch_list[0].graph
-
-		nodes = g._nodes_by_id.values()
-		for node in nodes:
-			node._set_device('/job:worker/task:0')
+			for fetch in fetch_list:
+				g = fetch.graph
+				nodes = g._nodes_by_id.values()
+				for node in nodes:
+					node._set_device('/job:container/task:0')
 
 		return self._sess.run(fetches, feed_dict, options, run_metadata)
 
