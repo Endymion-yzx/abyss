@@ -10,7 +10,7 @@ flags.DEFINE_integer("task_index", None,
                      "Worker task index, should be >= 0.")
 FLAGS = flags.FLAGS
 
-cluster = tf.train.ClusterSpec({'coord': FLAGS.coord_host, 
+cluster = tf.train.ClusterSpec({'coord': [FLAGS.coord_host], 
 			'container': FLAGS.container_hosts.split(',')})
 server = tf.train.Server(cluster, job_name=FLAGS.job_name, task_index=FLAGS.task_index)
 
