@@ -1,6 +1,7 @@
 from kubernetes import client, config
 import tensorflow as tf
 from random import randint
+import getpass
 
 class AbyssSession():
 	def __init__(self):
@@ -8,7 +9,7 @@ class AbyssSession():
 
 		self._coord_port = randint(5000, 10000)
 		self._resources = { 'service':[], 'replicaset':[] }
-		self._container_name = 'tf-container'
+		self._container_name = getpass.getuser() + 'tf-container'
 		# TODO: dynamically allocate IP or use DNS
 		self._container_IP = '10.100.100.100'
 		self._container_port = randint(5000, 10000)
