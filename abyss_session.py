@@ -9,7 +9,7 @@ class AbyssSession():
 
 		self._coord_port = randint(5000, 10000)
 		self._resources = { 'service':[], 'replicaset':[] }
-		self._container_name = getpass.getuser() + 'tf-container'
+		self._container_name = getpass.getuser() + '-tf-container'
 		# TODO: dynamically allocate IP or use DNS
 		self._container_IP = '10.100.100.100'
 		self._container_port = randint(5000, 10000)
@@ -17,7 +17,7 @@ class AbyssSession():
 		self._namespace = 'default'
 		self._image = '495609715/tf_container:v1.0.1'
 		self._script = '/container.py'
-
+                
 		# Start a container
 		config.load_kube_config()
 		service = client.V1Service()
@@ -29,8 +29,8 @@ class AbyssSession():
 		srvSpec.ports = [client.V1ServicePort(port=self._container_port)]
 		srvSpec.cluster_ip = self._container_IP
 		service.spec = srvSpec
-		api_instance = client.CoreV1Api()
-		api_instance.create_namespaced_service(namespace=self._namespace, body=service)
+		self._api_instance = client.CoreV1Api()
+		self._api_instance.create_namespaced_service(namespace=self._namespace, body=service)
 		self._resources['service'].append(service)
 
 		replicaset = client.V1beta1ReplicaSet()
@@ -60,8 +60,8 @@ class AbyssSession():
 		template.spec = podSpec
 		rsSpec.template = template
 		replicaset.spec = rsSpec
-		api_instance = client.ExtensionsV1beta1Api()
-		api_instance.create_namespaced_replica_set(namespace=self._namespace, body=replicaset)
+		self._api_instance_rs = client.ExtensionsV1beta1Api()
+		self._api_instance_rs.create_namespaced_replica_set(namespace=self._namespace, body=replicaset)
 		self._resources['replicaset'].append(replicaset)
 
 		# Create the cluster
@@ -92,7 +92,9 @@ class AbyssSession():
 
 	def close(self):
 		self._sess.close()
-		# TODO: delete the container
+		# Delete service and replicaset
+                self._api_instance.delete_namespaced_service(name=self._container_name, namespace=self._namespace)
+                self._api_instance_rs.delete_namespaced_replica_set(namespace=self._namespace, name=self._container_name, body=client.V1DeleteOptions())
 		self._closed = True
 
 	def __del__(self):
