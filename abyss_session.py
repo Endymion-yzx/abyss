@@ -8,32 +8,32 @@ class AbyssSession():
 	def __init__(self):
 		self._closed = False
 
-                self._ps_replicas = 1
-                self._worker_replicas = 2
-                self._replicas = {"ps": self._ps_replicas, "worker": self._worker_replicas}
-                self._worker_port = randint(5000, 10000)
+		self._ps_replicas = 1
+		self._worker_replicas = 2
+		self._replicas = {"ps": self._ps_replicas, "worker": self._worker_replicas}
+		self._worker_port = randint(5000, 10000)
 		self._coord_port = randint(5000, 10000)
 		self._resources = { 'service':[], 'replicaset':[] }
 		self._container_name = getpass.getuser() + '-tf-container'
-                self._worker_hosts = []
-                self._ps_hosts = []
-                for i in range(self._worker_replicas):
-                    #worker_name = self._container_name + '-worker-' + str(i) + ':' + str(self._port)
-                    worker_name = '10.100.100.11' + str(i) + ':' + str(self._worker_port)
-                    self._worker_hosts.append(worker_name)
+		self._worker_hosts = []
+		self._ps_hosts = []
+		for i in range(self._worker_replicas):
+		    #worker_name = self._container_name + '-worker-' + str(i) + ':' + str(self._port)
+		    worker_addr = '10.100.100.' + str(i) + ':' + str(self._worker_port)
+		    self._worker_hosts.append(worker_addr)
 
-                for j in range(self._ps_replicas):
-                    #ps_name = self._container_name + '-ps-' + str(j) + ':' + str(self._port)
-                    ps_name = '10.100.100.11' + str(j+self._worker_replicas) + ':' + str(self._worker_port)
-                    self._ps_hosts.append(ps_name)
+		for j in range(self._ps_replicas):
+		    #ps_name = self._container_name + '-ps-' + str(j) + ':' + str(self._port)
+		    ps_addr = '10.100.101.' + str(j) + ':' + str(self._worker_port)
+		    self._ps_hosts.append(ps_addr)
 		# TODO: dynamically allocate IP or use DNS
 		#self._namespace = 'tensorflow'
 		self._namespace = 'default'
 		self._image = 'ywanggf/multi_container:v2'
 		self._script = '/container.py'
-                
-                for job in ['worker', 'ps']:
-                    for i in range(self._replicas[job]):
+		
+		for job in ['worker', 'ps']:
+		    for i in range(self._replicas[job]):
 
 			# Start a container
 			config.load_kube_config()
@@ -45,9 +45,9 @@ class AbyssSession():
 			srvSpec.selector = { 'name': self._container_name + '-' + job + '-' + str(i), 'job': job, 'task': str(i) }
 			srvSpec.ports = [client.V1ServicePort(port=self._worker_port)]
 			if job == 'worker':
-                            srvSpec.cluster_ip = self._worker_hosts[i].split(':')[0]
-                        if job == 'ps':
-                            srvSpec.cluster_ip = self._ps_hosts[i].split(':')[0]
+			    srvSpec.cluster_ip = self._worker_hosts[i].split(':')[0]
+			if job == 'ps':
+			    srvSpec.cluster_ip = self._ps_hosts[i].split(':')[0]
 			service.spec = srvSpec
 
 			api_instance = client.CoreV1Api()
@@ -76,8 +76,8 @@ class AbyssSession():
 
 			container.args.append('--ps_hosts='+','.join(map(str,self._ps_hosts)))
 			container.args.append('--worker_hosts='+','.join(map(str,self._worker_hosts)))
-                        container.args.append('--coord_host=192.168.2.110:'+str(self._coord_port))
-                        print 'args:'
+			container.args.append('--coord_host=192.168.2.110:'+str(self._coord_port))
+			print 'args:'
 			print container.args
 			podSpec.containers = [container]
 			template.spec = podSpec
@@ -98,28 +98,40 @@ class AbyssSession():
 		self._sess = tf.Session(server.target)
 
 	def run(self, fetches, feed_dict=None, options=None, run_metadata=None):
-		if isinstance(fetches, tf.Tensor):
-			g = fetches.graph
-			nodes = g._nodes_by_id.values()
-			for node in nodes:
-				node._set_device('/job:worker/task:0')
-		else:
-			fetch_list = list(fetches)
-			for fetch in fetch_list:
-				g = fetch.graph
-				nodes = g._nodes_by_id.values()
-				for node in nodes:
-					node._set_device('/job:worker/task:0')
+		# if isinstance(fetches, tf.Tensor):
+		# 	g = fetches.graph
+		# 	nodes = g._nodes_by_id.values()
+		# 	for node in nodes:
+		# 		node._set_device('/job:worker/task:0')
+		# else:
+		# 	fetch_list = list(fetches)
+		# 	for fetch in fetch_list:
+		# 		g = fetch.graph
+		# 		nodes = g._nodes_by_id.values()
+		# 		for node in nodes:
+		# 			node._set_device('/job:worker/task:0')
 
 		return self._sess.run(fetches, feed_dict, options, run_metadata)
 
 	def close(self):
 		self._sess.close()
-		# Delete service and replicaset
-                for job in ['worker', 'ps']:
-                    for i in range(self._replicas[job]):
-			cmd = 'kubectl delete service,rs ' + self._container_name + '-' + job + '-' + str(i) 
-			subprocess.call(cmd, shell=True)
+
+		api_instance = client.ExtensionsV1beta1Api()
+		for replicaset in self._resources['replicaset']:
+			clearScale = client.ExtensionsV1beta1Scale(
+				api_version='extensions/v1beta1',
+				kind='Scale',
+				metadata=client.V1ObjectMeta(name=replicaset.metadata.name, namespace='default'),
+				spec=client.ExtensionsV1beta1ScaleSpec(replicas=0)) 
+
+			api_instance.replace_namespaced_replica_set_scale(
+				name=replicaset.metadata.name,
+				namespace='default',
+				body=clearScale)
+			
+			api_instance.delete_namespaced_replica_set(name=replicaset.metadata.name, namespace='default', body=client.V1DeleteOptions())
+
+		self._resources = { 'service': [], 'replicaset': [] }
 		self._closed = True
 
 	def __del__(self):
