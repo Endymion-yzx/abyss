@@ -30,12 +30,12 @@ class AbyssSession():
 		# TODO: dynamically allocate IP or use DNS
 		#self._namespace = 'tensorflow'
 		self._namespace = 'default'
-		self._image = 'ywanggf/multi_container:v2'
+		self._image = '495609715/tf_container:v1.0.2'
 		self._script = '/container.py'
 
 		self._job_map = {}      # Match machines required by user with containers
 		for job in ['worker', 'ps']:
-			ctn_job = 'container-' + job
+			ctn_job = 'container_' + job
 			self._job_map[job] = ctn_job
 		self._cluster_spec = {
 			self._job_map['worker']: self._worker_hosts, 
@@ -111,12 +111,17 @@ class AbyssSession():
 		for node in nodes:
 			device = node.device        # What if device is empty?
 			if re.search(r'job:([^\/]*)', device):
-				node._set_device(re.sub(r'job:([^\/]*)', lambda match: self._job_map[match.group(1)], device))
+				node._set_device(re.sub(r'job:([^\/]*)', 
+				lambda match: 'job:' + self._job_map[match.group(1)], device))
 
 		return self._sess.run(fetches, feed_dict, options, run_metadata)
 
 	def close(self):
 		self._sess.close()
+
+		api_instance = client.CoreV1Api()
+		for service in self._resources['service']:
+			api_instance.delete_namespaced_service(name=service.metadata.name, namespace='default')
 
 		api_instance = client.ExtensionsV1beta1Api()
 		for replicaset in self._resources['replicaset']:
