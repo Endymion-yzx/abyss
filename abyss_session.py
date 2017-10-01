@@ -6,44 +6,45 @@ import subprocess
 import re
 
 class AbyssSession():
-	def __init__(self):
+	def __init__(self, jobs, replicas):
 		self._closed = False
 
-		self._ps_replicas = 1
-		self._worker_replicas = 2
-		self._replicas = {"ps": self._ps_replicas, "worker": self._worker_replicas}
-		self._worker_port = randint(5000, 10000)
+		self._jobs = jobs
+		self._replicas = dict(zip(jobs, replicas))
+		#self._ps_replicas = 1
+		#self._worker_replicas = 2
+		#self._replicas = {"ps": self._ps_replicas, "worker": self._worker_replicas}
+		self._container_port = randint(5000, 10000)
 		self._coord_port = randint(5000, 10000)
 		self._resources = { 'service':[], 'replicaset':[] }
 		self._container_name = getpass.getuser() + '-tf-container'
-		self._worker_hosts = []
-		self._ps_hosts = []
-		for i in range(self._worker_replicas):
-			#worker_name = self._container_name + '-worker-' + str(i) + ':' + str(self._port)
-			worker_addr = '10.100.100.' + str(i) + ':' + str(self._worker_port)
-			self._worker_hosts.append(worker_addr)
+		#self._worker_hosts = []
+		#self._ps_hosts = []
 
-		for j in range(self._ps_replicas):
-			#ps_name = self._container_name + '-ps-' + str(j) + ':' + str(self._port)
-			ps_addr = '10.100.101.' + str(j) + ':' + str(self._worker_port)
-			self._ps_hosts.append(ps_addr)
 		# TODO: dynamically allocate IP or use DNS
+		self._hosts = {}
+		for i, job in enumerate(self._jobs):
+			self._hosts[job] = []
+			for j in range(self._replicas[job]):
+				addr = '10.100.' + str(i) + '.' + str(j) + ':' + str(self._container_port)
+				self._hosts[job].append(addr)
+		
 		#self._namespace = 'tensorflow'
 		self._namespace = 'default'
 		self._image = '495609715/tf_container:v1.0.2'
 		self._script = '/container.py'
 
 		self._job_map = {}      # Match machines required by user with containers
-		for job in ['worker', 'ps']:
+		for job in self._jobs:
 			ctn_job = 'container_' + job
 			self._job_map[job] = ctn_job
-		self._cluster_spec = {
-			self._job_map['worker']: self._worker_hosts, 
-			self._job_map['ps']: self._ps_hosts, 
-			# TODO: decide the coordinator's address
-			'coord': ['192.168.2.110:'+str(self._coord_port)]}
+		self._cluster_spec = {}
+		for job in self._jobs:
+			self._cluster_spec[self._job_map[job]] = self._hosts[job]
+		# TODO: decide the coordinator's address
+		self._cluster_spec['coord'] = ['192.168.2.110:' + str(self._coord_port)]
 		
-		for job in ['worker', 'ps']:
+		for job in self._jobs:
 
 			for i in range(self._replicas[job]):
 				# Start a container
@@ -54,11 +55,8 @@ class AbyssSession():
 				service.metadata = client.V1ObjectMeta(name=(self._container_name + '-' + job + '-' + str(i)))
 				srvSpec = client.V1ServiceSpec()
 				srvSpec.selector = { 'name': self._container_name + '-' + job + '-' + str(i), 'job': job, 'task': str(i) }
-				srvSpec.ports = [client.V1ServicePort(port=self._worker_port)]
-				if job == 'worker':
-					srvSpec.cluster_ip = self._worker_hosts[i].split(':')[0]
-				if job == 'ps':
-					srvSpec.cluster_ip = self._ps_hosts[i].split(':')[0]
+				srvSpec.ports = [client.V1ServicePort(port=self._container_port)]
+				srvSpec.cluster_ip = self._hosts[job][i].split(':')[0]
 				service.spec = srvSpec
 
 				api_instance = client.CoreV1Api()
@@ -78,7 +76,7 @@ class AbyssSession():
 				container = client.V1Container()
 				container.name = 'tensorflow'
 				container.image = self._image
-				container.ports = [client.V1ContainerPort(self._worker_port)]
+				container.ports = [client.V1ContainerPort(self._container_port)]
 				container.command = ['/usr/bin/python', self._script]
 				container.args = []
 				# Command line arguments
@@ -110,9 +108,9 @@ class AbyssSession():
 		nodes = graph._nodes_by_id.values()
 		for node in nodes:
 			device = node.device        # What if device is empty?
-			if re.search(r'job:([^\/]*)', device):
-				node._set_device(re.sub(r'job:([^\/]*)', 
-				lambda match: 'job:' + self._job_map[match.group(1)], device))
+			res = re.search(r'job:([^\/]*)', device)
+			if res and res.group(1) in self._job_map:
+				node._set_device(re.sub(res.group(1), self._job_map[res.group(1)], device))
 
 		return self._sess.run(fetches, feed_dict, options, run_metadata)
 
