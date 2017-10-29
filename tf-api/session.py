@@ -56,7 +56,6 @@ class AbyssSingleSession():
 		template = client.V1PodTemplateSpec()
 		template.metadata = client.V1ObjectMeta(labels={'name':self._container_name, 'job':'container', 'task':'0'})
 		container = client.V1Container(name='tensorflow')
-		# container.name = 'tensorflow'
 		container.image = self._image
 		container.ports = [client.V1ContainerPort(self._container_port)]
 		container.command = ['/usr/bin/python', self._script]
@@ -68,10 +67,8 @@ class AbyssSingleSession():
 		self._cluster_spec = {'container': [self._container_name+':'+str(self._container_port)], 
 			'coord': [self._coord_name+':'+str(self._coord_port)]}
 		container.args.append('--cluster_spec=' + str(self._cluster_spec))
-		print('args:')
-		print(container.args)
-		# podSpec = client.V1PodSpec()
-		# podSpec.containers = [container]
+		#print('args:')
+		#print(container.args)
 		podSpec = client.V1PodSpec(containers=[container])
 		template.spec = podSpec
 		rsSpec.template = template
@@ -82,7 +79,7 @@ class AbyssSingleSession():
 
 		# Create the cluster
 		cluster = ClusterSpec(self._cluster_spec)
-		print(cluster.__dict__)
+		#print(cluster.__dict__)
 		server = Server(cluster, job_name='coord', task_index=0)
 
 		# Create a session
@@ -203,7 +200,6 @@ class AbyssDistributedSession():
 				template = client.V1PodTemplateSpec()
 				template.metadata = client.V1ObjectMeta(labels={'name':self._container_name + '-' + job + '-' + str(i), 'job':job, 'task':str(i)})
 				container = client.V1Container(name='tensorflow')
-				# container.name = 'tensorflow'
 				container.image = self._image
 				container.ports = [client.V1ContainerPort(self._container_port)]
 				container.command = ['/usr/bin/python', self._script]
@@ -213,10 +209,8 @@ class AbyssDistributedSession():
 				container.args.append('--task_index=' + str(i))
 
 				container.args.append('--cluster_spec=' + str(self._cluster_spec))
-				print('args:')
-				print(container.args)
-				# podSpec = client.V1PodSpec()
-				# podSpec.containers = [container]
+				#print('args:')
+				#print(container.args)
 				podSpec = client.V1PodSpec(containers=[container])
 				template.spec = podSpec
 				rsSpec.template = template
@@ -227,8 +221,8 @@ class AbyssDistributedSession():
 
 		# Create the cluster
 		cluster = ClusterSpec(self._cluster_spec)
-		print('cluster:')
-		print(cluster.__dict__)
+		#print('cluster:')
+		#print(cluster.__dict__)
 		server = Server(cluster, job_name='coord', task_index=0)
 
 		# Create a session
